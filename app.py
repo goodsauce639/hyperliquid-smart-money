@@ -1,80 +1,54 @@
 import requests
 import pandas as pd
-from datetime import datetime
 import streamlit as st
 
 API_URL = "https://api.hyperliquid.xyz/info"
 
-def fetch_top_traders(n=20):
+def fetch_all_state():
     try:
-        response = requests.post(API_URL, json={"type": "leaderboard", "n": n})
+        response = requests.post(API_URL, json={"type": "allStateLite"})
         response.raise_for_status()
         data = response.json()
-        return [entry['username'] for entry in data['traders']]
+        return data["universe"]
     except Exception as e:
-        st.error(f"Error fetching top traders: {e}")
+        st.error(f"Error fetching asset state: {e}")
         return []
 
-def fetch_user_positions(username):
-    try:
-        payload = {"type": "userState", "user": username}
-        r = requests.post(API_URL, json=payload)
-        r.raise_for_status()
-        data = r.json()
-        results = []
-        for pos in data.get("assetPositions", []):
-            szi = float(pos["position"]["szi"])
-            entry_px = float(pos["position"]["entryPx"])
-            results.append({
-                "username": username,
-                "asset": pos["asset"],
-                "side": "LONG" if szi > 0 else "SHORT",
-                "size": abs(szi),
-                "entry_price": entry_px,
-                "uPnL": float(pos["position"]["uPnL"]),
-                "timestamp": datetime.utcnow()
-            })
-        return results
-    except Exception as e:
-        st.warning(f"Error fetching user {username} positions: {e}")
-        return []
+def process_asset_data(data):
+    records = []
+    for item in data:
+        asset = item.get("name")
+        mid_price = float(item.get("mid", 0))
+        oi = float(item.get("openInterest", 0))
+        funding = float(item.get("fundingRate", 0))
+        long_weight = float(item.get("longWeight", 0))
+        short_weight = float(item.get("shortWeight", 0))
 
-def fetch_all_positions(n=20):
-    top_traders = fetch_top_traders(n)
-    all_data = []
-    for user in top_traders:
-        positions = fetch_user_positions(user)
-        all_data.extend(positions)
-    return pd.DataFrame(all_data)
+        records.append({
+            "asset": asset,
+            "mid_price": mid_price,
+            "open_interest": oi,
+            "funding_rate": funding,
+            "long_weight": long_weight,
+            "short_weight": short_weight
+        })
+    return pd.DataFrame(records)
 
-st.set_page_config(page_title="Hyperliquid Smart Money Tracker", layout="wide")
-st.title("🧠 Hyperliquid Smart Money Tracker")
+st.set_page_config(page_title="Hyperliquid Market Overview", layout="wide")
+st.title("📊 Hyperliquid Market Signal Tracker")
 
-num_traders = st.slider("Number of Top Traders to Track", 5, 50, 20)
-selected_asset = st.text_input("Filter by Asset (e.g., ETH, ARB, PENDLE):", "")
+with st.spinner("Fetching live market state..."):
+    data = fetch_all_state()
 
-with st.spinner("Fetching data from Hyperliquid..."):
-    df = fetch_all_positions(num_traders)
+if data:
+    df = process_asset_data(data)
+    selected = st.multiselect("Select Assets", options=df["asset"].unique(), default=["ETH", "BTC", "ARB", "PENDLE"])
+    df_filtered = df[df["asset"].isin(selected)]
 
-if selected_asset:
-    df = df[df["asset"].str.upper() == selected_asset.upper()]
+    st.subheader("🔍 Asset Stats")
+    st.dataframe(df_filtered.sort_values("open_interest", ascending=False), use_container_width=True)
 
-st.subheader("Top Trader Positions")
-st.dataframe(df.sort_values("uPnL", ascending=False), use_container_width=True)
-
-if not df.empty:
-    st.subheader("🔍 Position Stats")
-    long_count = (df["side"] == "LONG").sum()
-    short_count = (df["side"] == "SHORT").sum()
-    total = long_count + short_count
-
-    st.metric("LONG Positions", f"{long_count} ({long_count/total:.1%})")
-    st.metric("SHORT Positions", f"{short_count} ({short_count/total:.1%})")
-
-    long_uPnl = df[df["side"] == "LONG"]["uPnL"].sum()
-    short_uPnl = df[df["side"] == "SHORT"]["uPnL"].sum()
-
-    st.metric("LONG uPnL", f"${long_uPnl:,.2f}")
-    st.metric("SHORT uPnL", f"${short_uPnl:,.2f}")
+    st.subheader("📈 Funding Rate vs Open Interest")
+    st.bar_chart(df_filtered.set_index("asset")[["funding_rate", "open_interest"]])
 else:
-    st.warning("No positions found for this asset.")
+    st.warning("No data received.")
