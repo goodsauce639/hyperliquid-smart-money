@@ -6,28 +6,38 @@ import streamlit as st
 API_URL = "https://api.hyperliquid.xyz/info"
 
 def fetch_top_traders(n=20):
-    response = requests.post(API_URL, json={"type": "leaderboard", "n": n})
-    data = response.json()
-    return [entry['username'] for entry in data['traders']]
+    try:
+        response = requests.post(API_URL, json={"type": "leaderboard", "n": n})
+        response.raise_for_status()
+        data = response.json()
+        return [entry['username'] for entry in data['traders']]
+    except Exception as e:
+        st.error(f"Error fetching top traders: {e}")
+        return []
 
 def fetch_user_positions(username):
-    payload = {"type": "userState", "user": username}
-    r = requests.post(API_URL, json=payload)
-    data = r.json()
-    results = []
-    for pos in data.get("assetPositions", []):
-        szi = float(pos["position"]["szi"])
-        entry_px = float(pos["position"]["entryPx"])
-        results.append({
-            "username": username,
-            "asset": pos["asset"],
-            "side": "LONG" if szi > 0 else "SHORT",
-            "size": abs(szi),
-            "entry_price": entry_px,
-            "uPnL": float(pos["position"]["uPnL"]),
-            "timestamp": datetime.utcnow()
-        })
-    return results
+    try:
+        payload = {"type": "userState", "user": username}
+        r = requests.post(API_URL, json=payload)
+        r.raise_for_status()
+        data = r.json()
+        results = []
+        for pos in data.get("assetPositions", []):
+            szi = float(pos["position"]["szi"])
+            entry_px = float(pos["position"]["entryPx"])
+            results.append({
+                "username": username,
+                "asset": pos["asset"],
+                "side": "LONG" if szi > 0 else "SHORT",
+                "size": abs(szi),
+                "entry_price": entry_px,
+                "uPnL": float(pos["position"]["uPnL"]),
+                "timestamp": datetime.utcnow()
+            })
+        return results
+    except Exception as e:
+        st.warning(f"Error fetching user {username} positions: {e}")
+        return []
 
 def fetch_all_positions(n=20):
     top_traders = fetch_top_traders(n)
